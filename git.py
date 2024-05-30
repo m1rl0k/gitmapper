@@ -1,27 +1,55 @@
-import git
+import requests
 import pandas as pd
 import plotly.graph_objects as go
 import datetime
 import numpy as np
 
-# Clone or open the existing repository
-repo = git.Repo('.')  # Assumes the script is run in the root of the repo
+# Replace with your GitHub token and organization
+GITHUB_TOKEN = 'your_github_token'
+ORG_NAME = 'your_org_name'
 
-# Gather commit data
-commits = []
-for commit in repo.iter_commits('master'):
-    commits.append({
-        'hash': commit.hexsha,
-        'date': datetime.datetime.fromtimestamp(commit.committed_date),
-        'message': commit.message,
-        'author': commit.author.name
-    })
+# Fetch all repositories in the organization
+def fetch_repos(org_name):
+    url = f'https://api.github.com/orgs/{org_name}/repos'
+    headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+    response = requests.get(url, headers=headers)
+    return response.json()
+
+# Fetch commits for a repository
+def fetch_commits(repo_name):
+    commits = []
+    url = f'https://api.github.com/repos/{ORG_NAME}/{repo_name}/commits'
+    headers = {'Authorization': f'token {GITHUB_TOKEN}'}
+    params = {'per_page': 100, 'page': 1}
+    
+    while True:
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != 200:
+            break
+        batch = response.json()
+        if not batch:
+            break
+        commits.extend(batch)
+        params['page'] += 1
+    
+    return commits
+
+# Collect commit data from all repositories
+repos = fetch_repos(ORG_NAME)
+all_commits = []
+
+for repo in repos:
+    repo_commits = fetch_commits(repo['name'])
+    for commit in repo_commits:
+        commit_date = commit['commit']['author']['date']
+        commit_date = datetime.datetime.strptime(commit_date, '%Y-%m-%dT%H:%M:%SZ').date()
+        all_commits.append({'repo': repo['name'], 'date': commit_date})
 
 # Create a DataFrame
-commit_data = pd.DataFrame(commits)
+commit_data = pd.DataFrame(all_commits)
 
 # Group by date and count commits
-commit_counts = commit_data.groupby(commit_data['date'].dt.date).size().reset_index(name='commits')
+commit_counts = commit_data.groupby(commit_data['date']).size().reset_index(name='commits')
 
 # Create the 3D plot
 fig = go.Figure()
